@@ -1,0 +1,176 @@
+
+
+%% Step 1: Read Image
+I = imread("cameraman.tif");
+figure;
+imshow(I);
+title("Original Image");
+
+%% Step 2: Simulate a Blur
+PSF = fspecial("gaussian",7,10);
+Blurred = imfilter(I,PSF,"symmetric","conv");
+figure;
+imshow(Blurred);
+title("Blurred Image");
+
+
+%% Step 3a: Deblurring with Undersized PSF
+UNDERPSF = ones(size(PSF)-4);
+[J1,P1] = deconvblind(Blurred,UNDERPSF);
+
+figure;
+imshow(J1);
+title("Deblurring with Undersized PSF");
+
+%% Step 3b: Deblurring with Oversized PSF
+OVERPSF = padarray(UNDERPSF,[4 4],"replicate","both");
+[J2,P2] = deconvblind(Blurred,OVERPSF);
+
+figure;
+imshow(J2);
+title("Deblurring with Oversized PSF");
+
+%% Step 3c: Deblurring with True-size PSF
+INITPSF = padarray(UNDERPSF,[2 2],"replicate","both");
+[J3,P3] = deconvblind(Blurred,INITPSF);
+
+figure;
+imshow(J3);
+title("Deblurring with INITPSF (True-size PSF)");
+
+%% Step 4: Analyze the Restored PSFs
+
+figure();
+subplot(2,2,1);
+imshow(PSF, [], 'InitialMagnification', 'fit');
+title("True PSF");
+axis off;
+
+subplot(2,2,2);
+imshow(P1, [], 'InitialMagnification', 'fit');
+title("Reconstructed Undersized PSF");
+axis off;
+
+subplot(2,2,3);
+imshow(P2, [], 'InitialMagnification', 'fit');
+title("Reconstructed Oversized PSF");
+axis off;
+
+subplot(2,2,4);
+imshow(P3, [], 'InitialMagnification', 'fit');
+title("Reconstructed True-size PSF");
+axis off;
+
+
+%% Step 5: Improving the Restoration (Weighted Deblurring)
+
+%mendeteksi tepi gambar (area tajam).
+WEIGHT = edge(Blurred,"sobel",0.08);
+se = strel("disk",2);
+%memperlebar area tepi agar mencakup zona sekitar
+WEIGHT = 1 - double(imdilate(WEIGHT,se));
+
+%Nol-kan area pinggir
+WEIGHT([1:3 end-(0:2)],:) = 0;
+WEIGHT(:,[1:3 end-(0:2)]) = 0;
+
+%Tampilkan PSF dan Weight Array
+figure;
+subplot(2,2,1);
+imshow(PSF,[],InitialMagnification="fit");
+title("True PSF"); axis off;
+
+subplot(2,2,2);
+imshow(P1,[],InitialMagnification="fit");
+title("Reconstructed Undersized PSF"); axis off;
+
+subplot(2,2,3);
+imshow(P2,[],InitialMagnification="fit");
+title("Reconstructed Oversized PSF"); axis off;
+
+subplot(2,2,4);
+imshow(WEIGHT);
+title("Weight Array"); axis off;
+
+%% Lakukan deblurring dengan bobot
+[J,P] = deconvblind(Blurred,INITPSF,30,[],WEIGHT);
+%Tampilkan hasil akhir
+figure;
+subplot(2,2,1);
+imshow(PSF,[],InitialMagnification="fit");
+title("True PSF"); axis off;
+
+subplot(2,2,2);
+imshow(P1,[],InitialMagnification="fit");
+title("Reconstructed Undersized PSF"); axis off;
+
+subplot(2,2,3);
+imshow(P2,[],InitialMagnification="fit");
+title("Reconstructed Oversized PSF"); axis off;
+
+subplot(2,2,4);
+imshow(J)
+title("Deblurred Image"); axis off;
+
+%% Step 6: Using Additional Constraints on the PSF Restoration
+P1 = 2; P2 = 2;
+%Memotong tepi PSF sebanyak 2 piksel dari setiap sisi.
+FUN = @(PSF) padarray(PSF(P1+1:end-P1,P2+1:end-P2),[P1 P2]);
+
+[JF,PF] = deconvblind(Blurred,OVERPSF,30,[],WEIGHT,FUN);
+figure;
+imshow(JF)
+title("Deblurred Image")
+
+
+
+
+%% Evaluasi hasil deblurring Step 5 dan Step 6
+
+% --- 1. Hitung PSNR (Peak Signal-to-Noise Ratio)
+psnr_step5 = psnr(J, I);
+psnr_step6 = psnr(JF, I);
+
+% --- 2. Hitung SSIM (Structural Similarity Index)
+ssim_step5 = ssim(J, I);
+ssim_step6 = ssim(JF, I);
+
+% --- 3. Hitung MSE (Mean Squared Error)
+mse_step5 = immse(J, I);
+mse_step6 = immse(JF, I);
+
+% --- 4. Tampilkan hasil perbandingan
+fprintf("=== Evaluasi Hasil Deblurring ===\n");
+fprintf("Step 5 (Weighted): PSNR (Peak Signal-to-Noise Ratio) = %.2f dB, SSIM (Structural Similarity Index) = %.4f, MSE (Mean Squared Error) = %.4f\n", psnr_step5, ssim_step5, mse_step5);
+fprintf("Step 6 (Constrained): PSNR (Peak Signal-to-Noise Ratio) = %.2f dB, SSIM (Structural Similarity Index) = %.4f, MSE (Mean Squared Error) = %.4f\n", psnr_step6, ssim_step6, mse_step6);
+
+% --- 5. Bandingkan secara visual
+figure;
+subplot(1,3,1);
+imshow(I);
+title('Original Image');
+
+subplot(1,3,2);
+imshow(J);
+title(sprintf('Step 5 (Weighted)\nPSNR=%.2f dB, SSIM=%.3f', psnr_step5, ssim_step5));
+
+subplot(1,3,3);
+imshow(JF);
+title(sprintf('Step 6 (Constrained)\nPSNR=%.2f dB, SSIM=%.3f', psnr_step6, ssim_step6));
+
+
+
+
+%% menentukan iterasi optimal
+
+iterations = [10, 20, 30, 40, 50, 60, 80];
+for k = 1:length(iterations)
+    [Jtest, Ptest] = deconvblind(Blurred, INITPSF, iterations(k), [], WEIGHT);
+    psnr_val(k) = psnr(Jtest, I);
+    ssim_val(k) = ssim(Jtest, I);
+end
+figure;
+plot(iterations, psnr_val, '-o'); hold on;
+plot(iterations, ssim_val, '-x');
+legend('PSNR','SSIM'); xlabel('Iterasi'); ylabel('Nilai');
+title('Evaluasi Kualitas terhadap Jumlah Iterasi');
